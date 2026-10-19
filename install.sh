@@ -7,12 +7,15 @@ state_dir=${XDG_STATE_HOME:-"$HOME/.local/state"}/glossyglass
 
 if [[ ${1:-} == --restore ]]; then
     backup=${2:?Usage: ./install.sh --restore BACKUP_DIRECTORY}
-    for app in kitty fish; do
+    apps=(kitty fish)
+    # Backups from older releases have no Micro entry.
+    if [[ -d "$backup/micro" || -f "$backup/micro.absent" ]]; then apps+=(micro); fi
+    for app in "${apps[@]}"; do
         [[ -d "$backup/$app" || -f "$backup/$app.absent" ]] || { echo "Invalid backup: $backup" >&2; exit 1; }
     done
     saved="$state_dir/backups/pre-restore-$(date +%Y%m%d-%H%M%S)-$$"
     mkdir -p "$saved" "$config_dir"
-    for app in kitty fish; do
+    for app in "${apps[@]}"; do
         if [[ -e "$config_dir/$app" || -L "$config_dir/$app" ]]; then
             mv -- "$config_dir/$app" "$saved/$app"
         else
@@ -26,18 +29,18 @@ fi
 if [[ $# -gt 0 ]]; then echo 'Usage: ./install.sh [--restore BACKUP_DIRECTORY]' >&2; exit 1; fi
 
 # Install missing runtime dependencies using the system package manager.
-if ! command -v kitty >/dev/null || ! command -v fish >/dev/null || ! command -v fc-match >/dev/null; then
+if ! command -v kitty >/dev/null || ! command -v fish >/dev/null || ! command -v fc-match >/dev/null || ! command -v micro >/dev/null || ! command -v python3 >/dev/null; then
     privilege=()
     if [[ $EUID -ne 0 ]]; then privilege=(sudo); fi
     if command -v pacman >/dev/null; then
-        "${privilege[@]}" pacman -S --needed --noconfirm kitty fish fontconfig
+        "${privilege[@]}" pacman -S --needed --noconfirm kitty fish micro fontconfig python
     elif command -v apt-get >/dev/null; then
         "${privilege[@]}" apt-get update
-        "${privilege[@]}" apt-get install -y kitty fish fontconfig
+        "${privilege[@]}" apt-get install -y kitty fish micro fontconfig python3
     elif command -v dnf >/dev/null; then
-        "${privilege[@]}" dnf install -y kitty fish fontconfig
+        "${privilege[@]}" dnf install -y kitty fish micro fontconfig python3
     elif command -v zypper >/dev/null; then
-        "${privilege[@]}" zypper --non-interactive install kitty fish fontconfig
+        "${privilege[@]}" zypper --non-interactive install kitty fish micro fontconfig python3
     else
         echo 'Install kitty, fish, and fontconfig with your package manager, then rerun.' >&2
         exit 1
@@ -51,21 +54,35 @@ GLOSSYGLASS_SOURCE="$source_dir" kitty +runpy 'import os; from kitty.config impo
 
 backup="$state_dir/backups/$(date +%Y%m%d-%H%M%S)-$$"
 mkdir -p "$backup" "$config_dir"
-# Stage both configs before touching the current installation.
+# Stage all configs before touching the current installation.
 staging=$(mktemp -d "$config_dir/.glossyglass.XXXXXXXX")
 trap 'rm -rf -- "$staging"' EXIT
 cp -R -- "$source_dir/kitty" "$source_dir/fish" "$staging/"
+# Keep Micro plugins, bindings, and unrelated settings.
+if [[ -d "$config_dir/micro" ]]; then
+    cp -aL -- "$config_dir/micro" "$staging/micro"
+fi
+mkdir -p "$staging/micro/colorschemes"
+cp -- "$source_dir/micro/colorschemes/glossyglass.micro" "$staging/micro/colorschemes/"
+python3 - "$staging/micro/settings.json" <<'PYSETTINGS'
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+settings = json.loads(p.read_text()) if p.exists() else {}
+settings.update(colorscheme="glossyglass")
+p.write_text(json.dumps(settings, indent=4) + "\n")
+PYSETTINGS
 # Fontconfig selects a readable monospace fallback if Adwaita Mono is absent.
 font=$(fc-match -f '%{family}' 'Adwaita Mono' | head -c 200)
 printf 'Font: %s\n' "$font"
-for app in kitty fish; do
+for app in kitty fish micro; do
     if [[ -e "$config_dir/$app" || -L "$config_dir/$app" ]]; then
         cp -a -- "$config_dir/$app" "$backup/$app"
     else
         touch "$backup/$app.absent"
     fi
 done
-for app in kitty fish; do
+for app in kitty fish micro; do
     rm -rf -- "$config_dir/$app"
     mv -- "$staging/$app" "$config_dir/$app"
 done
