@@ -8,8 +8,10 @@ state_dir=${XDG_STATE_HOME:-"$HOME/.local/state"}/glossyglass
 if [[ ${1:-} == --restore ]]; then
     backup=${2:?Usage: ./install.sh --restore BACKUP_DIRECTORY}
     apps=(kitty fish)
-    # Backups from older releases have no Micro entry.
-    if [[ -d "$backup/micro" || -f "$backup/micro.absent" ]]; then apps+=(micro); fi
+    # Restore optional app configs only when present in that backup.
+    for optional_app in micro fastfetch; do
+        if [[ -d "$backup/$optional_app" || -f "$backup/$optional_app.absent" ]]; then apps+=("$optional_app"); fi
+    done
     for app in "${apps[@]}"; do
         [[ -d "$backup/$app" || -f "$backup/$app.absent" ]] || { echo "Invalid backup: $backup" >&2; exit 1; }
     done
@@ -72,17 +74,23 @@ settings = json.loads(p.read_text()) if p.exists() else {}
 settings.update(colorscheme="glossyglass")
 p.write_text(json.dumps(settings, indent=4) + "\n")
 PYSETTINGS
+# Preserve additional Fastfetch assets and replace only its main theme config.
+if [[ -d "$config_dir/fastfetch" ]]; then
+    cp -aL -- "$config_dir/fastfetch" "$staging/fastfetch"
+fi
+mkdir -p "$staging/fastfetch"
+cp -- "$source_dir/fastfetch/config.jsonc" "$staging/fastfetch/config.jsonc"
 # Fontconfig selects a readable monospace fallback if Adwaita Mono is absent.
 font=$(fc-match -f '%{family}' 'Adwaita Mono' | head -c 200)
 printf 'Font: %s\n' "$font"
-for app in kitty fish micro; do
+for app in kitty fish micro fastfetch; do
     if [[ -e "$config_dir/$app" || -L "$config_dir/$app" ]]; then
         cp -a -- "$config_dir/$app" "$backup/$app"
     else
         touch "$backup/$app.absent"
     fi
 done
-for app in kitty fish micro; do
+for app in kitty fish micro fastfetch; do
     rm -rf -- "$config_dir/$app"
     mv -- "$staging/$app" "$config_dir/$app"
 done

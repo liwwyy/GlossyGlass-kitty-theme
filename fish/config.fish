@@ -28,5 +28,5 @@ if status is-interactive
     set -g fish_pager_color_selected_background --background=302127
     set -g fish_ellipsis '...'
     set -g fish_truncation_char '.'
-    set -g VIRTUAL_ENV_DISABLE_PROMPT 1
+    set -gx VIRTUAL_ENV_DISABLE_PROMPT 1
 end
